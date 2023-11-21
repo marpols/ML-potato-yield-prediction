@@ -30,16 +30,13 @@ run <- 1
 
 
 hybrid <- F
-tuning <- F
 
 if (hybrid){
   data <- data.frame(read.csv(hybrid_data))
   dir <- paste(wd,"/",dataname,"_Hybridrun",run,sep="")
-  rf_res <- "hybrid_pred.csv" #file name for hybrid predictions
 } else{
   data <- data.frame(read.csv(mlalone))
   dir <- paste(wd,"/",dataname,"_RFrun",run,sep="")
-  rf_res <- "RF_pred.csv" #file name for RF alone predictions
 }
 
 #select only datapoints that have %sand info (have soil samples)
@@ -64,57 +61,124 @@ calc_metrics <- function(actual,predicted){
   return (c(mse,rmse,rrmse,r2,bias,pbias))
 }
 
-#Tuning and Feature Selection---------------------------------------------------
-if (tuning){ 
-  
-  ind <- sample(2, nrow(ss_data), replace = TRUE, prob=c(0.8,0.2))
-  train_x <- ss_data[ind==1,4:c]
-  train_y <- ss_data[ind==1,1]
-  test_x <- ss_data[ind==2,4:c]
-  test_y <- ss_data[ind==2,1]
+#Feature Selection--------------------------------------------------------------
+featselec <- function(train_x,train_y,test_x,test_y, nt=500){
   
   set.seed(1234)
   
-  #run random forest for CV and train
-  CV <- rfcv(train_x,train_y,cv.fold=5,scale="log",step=0.5,
-       mtry=function(p) max(1, floor(sqrt(p))))
+  varlist <- list()
+  
+  #CV for feature selection
+  CV <- rfcv(
+    train_x,
+    train_y,
+    cv.fold = 5,
+    scale = "log",
+    step = 0.5,
+    mtry = function(p)
+      max(1, floor(sqrt(p))))
+  
   nvars <- as.data.frame(CV$error.cv)
   nvars$vars <- as.numeric(rownames(nvars))
-  v <- nvars$vars[nvars$`CV$error.cv`==min(nvars$`CV$error.cv`)]
+  v <- nvars$vars[nvars$`CV$error.cv` == min(nvars$`CV$error.cv`)]
   
-  mtry <- as.data.frame(tuneRF(train_x,train_y, stepFactor=1.5))
+  mtry <- as.data.frame(tuneRF(train_x, train_y, stepFactor = 1.5))
   n <- mtry$mtry[mtry$OOBError == min(mtry$OOBError)]
   
-  rf <- randomForest(train_x,y=train_y, proximity=TRUE, ntree=300, mtry=n, plot=TRUE)
+  rf <- randomForest(
+    train_x,
+    y = train_y,
+    proximity = TRUE,
+    ntree = nt,
+    mtry = n,
+    plot = TRUE)
   print(rf)
   
   #get variable importance
   var_imp <- rf$importance
   vars <- row.names(rf$importance)
-  importance <- data.frame(vars,var_imp) %>% arrange(desc(var_imp))
-  write.csv(importance,file="variable_importance.csv",row.names = F)
+  importance <- data.frame(vars, var_imp) %>% arrange(desc(var_imp))
+  write.csv(importance, file = "variable_importance.csv", row.names = F)
   
   j <- 1
-  while (j <= v+5){
+  while (j <= v + 5) { #use additional 5 features
     trnx <- train_x[importance$vars[1:j]]
     tstx <- test_x[importance$vars[1:j]]
-    mtry <- as.data.frame(tuneRF(train_x,train_y, stepFactor=1.5))
+    mtry <- as.data.frame(tuneRF(train_x, train_y, stepFactor = 1.5))
     n <- mtry$mtry[mtry$OOBError == min(mtry$OOBError)]
-    rf <- randomForest(trnx,y=train_y, proximity=TRUE, ntree=300, mtry=n, plot=TRUE)
-    trnm <- calc_metrics(train_y,rf[3]$predicted)
-    pred <- predict(rf,tstx,type="response",predict.all=TRUE)
+    rf <-
+      randomForest(
+        trnx,
+        y = train_y,
+        proximity = TRUE,
+        ntree = 300,
+        mtry = n,
+        plot = TRUE
+      )
+    trnm <- calc_metrics(train_y, rf[3]$predicted)
+    pred <- predict(rf, tstx, type = "response", predict.all = TRUE)
     tstm <- calc_metrics(test_y, pred[[1]])
     
-    write
+    #number of features, ntree, mtry, train mse, test mse
+    val <- data.frame(v, nt, n, trnm[1], testm[1])
+    varlist[[j]] <- val
     
-
+    print(paste("number of features:",v,"ntree:",nt,"mtry:",n,"train MSE:",
+                trn[1],"test MSE:",testm[1],sep=" "))
+    print(importance$vars[1:j])
+    
+    j <- j + 1
   }
+  return (varlist)
+}
+
+
+#Hyperparameter tuning (mtry and ntree)-----------------------------------------
+hype_tune <- function(train, test, y, folds=10, repeats=3, mtry_seq=(1:60), 
+                     ntree_seq=seq(100,900,by=200)){
+#train - all training data (including train y)
+#test - test X values 
+#y - test y values
+  
+  modellist <- list()
+  
+  control <- trainControl(method='repeatedcv', 
+                          number=folds, 
+                          repeats=3, 
+                          search='grid')
+  
+  tunegrid <- expand.grid(.mtry = mtry_seq)
+  
+  print(paste("Training with ",folds,"-Fold Cross Validation",sep=""))
+  for (nt in ntree_seq){
+    set.seed(1234)
+    key <- toString(nt)
+    print(paste("Ntree: ",key,sep=""))
+    
+    rf_gridsearch <- train(yield_tha ~ ., 
+                           data = train,
+                           method = 'rf',
+                           metric = 'RMSE',
+                           trControl = control,
+                           tuneGrid = tunegrid,
+                           ntree=nt)
+    
+    modellist[[key]] <- rf_gridsearch
+    
+    rf_pred <- predict(rf_gridsearch,test)
+    pred_res <- calc_metrics(y,as.numeric(rf_pred))
+    
+    n <- as.numeric(rf_gridsearch$bestTune$mtry)
+    print(paste("best mtry:",n, 
+                "train_RMSE:",rf_gridsearch$results$RMSE[rf_gridsearch$results$mtry==n], 
+                "test_RMSE:", pred_res[2],sep=" "))
+    
+  }
+  return (modellist)
 }
 
 
 
-features <- c("yield_tha","Year","CFIDYr","GDDcum","GDDcum_gs","Sept.precip","harvest_jul","HD.rad.cum_gs",
-              "PH1","DEMslope1","sh_PER_CLA","plant_jul","sh_PER_OM")
 #RANDOM FOREST------------------------------------------------------------------
 
 c <- length(ss_data)
@@ -128,6 +192,7 @@ labels <- c("L-2015","OS-2017","I17-2016","L-2017","CN-2017","P-2017","BR-2017",
 i <- 1
 for (f in fields){
   train_x <- ss_data[ss_data$CFIDYr != f, 2:c]
+  all_train <- ss_data[ss_data$CFIDYr != f, 1:c] %>% select(1,4:c)
   train_y <- ss_data[ss_data$CFIDYr != f, 1]
   test_x <- ss_data[ss_data$CFIDYr == f, 2:c]
   test_y <- ss_data[ss_data$CFIDYr == f,1]
@@ -141,8 +206,12 @@ for (f in fields){
   test_x <- test_x[,3:length(test_x)]
   
   set.seed(1234)
-  mtry <- as.data.frame(tuneRF(train_x,train_y, stepFactor=1.5))
-  n <- mtry$mtry[mtry$OOBError == min(mtry$OOBError)]
+  #feature selection and hyperparameter tuning
+  features <- featselec(train_x,test_x,train_y,test_y)
+  params <- hype_tune(all_train,test_x,test_y)
+  
+  # mtry <- as.data.frame(tuneRF(train_x,train_y, stepFactor=1.5))
+  # n <- mtry$mtry[mtry$OOBError == min(mtry$OOBError)]
   
   #run random forest (training)
   rf <- randomForest(train_x,y=train_y, proximity=TRUE, ntree=300, mtry=n, plot=TRUE)
@@ -158,10 +227,12 @@ for (f in fields){
   field_pred <- data.frame(labels[i],test_y,prediction[[1]])
   colnames(field_pred) <- c("Label","Actual","Predicted")
   if (i == 1){
-    write.table(field_pred, file=paste(dir,"/",rf_res,run,".csv",sep=""), row.names = F,col.names = T, append = F, sep=",")
+    write.table(field_pred, file=paste(dir,"/","allFields_",run,".csv",sep=""), row.names = F,col.names = T, append = F, sep=",")
   } else {
-    write.table(field_pred, file=paste(dir,"/",rf_res,run,".csv",sep=""), row.names = F,col.names = F, append = T, sep=",")
+    write.table(field_pred, file=paste(dir,"/","allFields_",run,".csv",sep=""), row.names = F,col.names = F, append = T, sep=",")
   }
+  
+  write.table(field_pred, file=paste(dir,"/",f,run,".csv",sep=""), row.names = F,col.names = T, append = F, sep=",")
   
   test_metrics <- calc_metrics(test_y, prediction[[1]])
   
