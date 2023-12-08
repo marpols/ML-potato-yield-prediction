@@ -19,17 +19,15 @@ if (!require("Metrics")){
 if (!require("ggplot2")){
   install.packages("ggplot2")
 }
-packages <- c("dplyr","readxl","randomForest","caret","Metrics","ggplot2","tidyr","reshape2","RColorBrewer")
+packages <- c("dplyr","readxl","randomForest","caret","Metrics","ggplot2",
+              "tidyr","reshape2","RColorBrewer")
 lapply(packages, library, character.only=TRUE)
 
 source("rfFunctions.R")
 source("rfPlots.R")
 
-wd <- getwd()
-mlalone <- paste(wd,"/MattRamsay_RU_20152021/mrData.csv",sep="")
-#hybrid_data <- paste(wd,"",sep="")
 dataname <- "MR"
-run <- "noNormcv2"
+run <- "noNormcv5"
 
 kfolds <- 5 #number of folds
 nsize <- c(1,5,10) #min nodesize -> larger number=smaller tree. Regression default=5
@@ -41,36 +39,16 @@ normalization <- F
 normtype <- 1 #1 for log scale, 2 for min/max
 
 if (hybrid){
-  data <- data.frame(read.csv(hybrid_data))
+  load()
   dir <- paste(wd,"/",dataname,"_Hybrid",run,sep="")
   dir.create(dir)
   setwd(dir)
 } else{
-  data <- data.frame(read.csv(mlalone))
+  load("MLalone_original.RData")
   dir <- paste(wd,"/",dataname,"_RF",run,sep="")
   dir.create(dir)
   setwd(dir)
 }
-
-#select only datapoints that have %sand info (have soil samples)
-ss_data <- subset(data, data$sh_PER_SAN != 0) %>% select(6:33,35,41:47,50:55,58,59,62:69,72:79,82:89,92:108)
-# yld_dist_snd <- ggplot(ss_data, aes(x=yield_tha)) + geom_histogram(color="black", fill="white") + labs(x="Yield (t/ha)", title = "Distribution of Russet Yield Datapoints with Field Soil Information")
-# yld_dist_snd
-ss_data$PH1[which(ss_data$PH1 %in% c(0))] <- 6.0 #replace missing pH values with pH of 6 as per CANSIS data
-
-#move field ID, year, and yield columns to front
-ss_data <- ss_data %>% dplyr::select("plant_ye", everything())
-ss_data <- ss_data %>% dplyr::select("CFIDYr", everything())
-ss_data <- ss_data %>% dplyr::select("yield_tha", everything()) 
-
-c <- length(ss_data)
-
-fields <- unique(ss_data$CFIDYr) %>% sort() #get list of full field names
-labels <- c("L-2015","OS-2017","I17-2016","L-2017","CN-2017","P-2017","BR-2017",
-            "JM-2017","M1-2017","I13-2017","OCR-2019","IC-2019","I17-2019",
-            "RB-2019","P-2019","M4-2017","OS-2019","L-2021","JM-2020",
-            "GRS-2019") %>% sort() #general labels for fields
-
 
 #RANDOM FOREST------------------------------------------------------------------
 
@@ -135,7 +113,8 @@ for (f in fields){
     min_nodesrch <- list()
     for (minn in nsize){
       print(paste("------ Nodesize: ",minn,sep=""))
-      rfs <- hype_tune(all_train,test_x,test_y,folds=kfolds,mtry_seq=s,nodesize = minn, ntree_seq = c(100,200))
+      rfs <- hype_tune(all_train,test_x,test_y,folds=kfolds,
+                       mtry_seq=s, nodesize = minn)
       best <- best_mod(rfs)
       min_nodesrch[[toString(minn)]] <- best
     }
@@ -189,3 +168,4 @@ for (f in fields){
 }
 print(Sys.time() - begin)
 
+generate_plot(paste("ActualVsPredicted_avg",run,".csv",sep=""),run,dataname)

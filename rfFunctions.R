@@ -1,5 +1,5 @@
 #****************************************************************************
-#Functions used in the RandomForest R script. 
+#Functions used in the RandomForest.R script. 
 #See rfFunctions read.me for more information.
 #****************************************************************************
 
