@@ -2,14 +2,14 @@
 #Generate metrics and Actual Vs. Predicted plot for results of random forest overall.
 #****************************************************************************
 
-generate_plot <- function(datafile,run,method,labels="Year"){
+generate_plot <- function(datafile,run,method,label="Year"){
 avg_fields <- read.csv(datafile)
 
 metrics_oa <- calc_metrics(avg_fields$Actual, avg_fields$Predicted)
 
 metrics_all <- data.frame("Overall Field-Years"=metrics_oa)
 rownames(metrics_all) <- c("MSE","RMSE","RRMSE","R2","BIAS","PBIAS")
-write.csv(paste(method,"_metrics",run,".csv",sep=""))
+write.csv(metrics_all,paste(method,"_metrics",run,".csv",sep=""))
 
 #generate plot
 if(label=="CFIDYr"){

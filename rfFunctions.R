@@ -3,7 +3,7 @@
 #See rfFunctions read.me for more information.
 #****************************************************************************
 
-#functions----------------------------------------------------------------------
+#Model Selection Functions----------------------------------------------------------------------
 calc_metrics <- function(actual,predicted){
   tryCatch(sd(predicted))
   mse <- mse(actual, predicted)
@@ -16,7 +16,7 @@ calc_metrics <- function(actual,predicted){
 }
 
 min_mse <- function(fs_results){
-  #Find best model based on MSE for add-on-in feature selection models
+  #Find best model based on MSE for add-one-in feature selection models
   min_train <- fs_results[[1]]$metrics$train_mse
   train_n <- 1
   min_test <- fs_results[[1]]$metrics$test_mse
@@ -50,38 +50,34 @@ min_mse <- function(fs_results){
 
 best_mod <- function(models, nodesize = F){
   #find best model based on RMSE
+  mintrain <- 1000 #arbitrary initial value
+  amod <- NULL
+  mintest <- 1000 #arbitrary initial value
+  bmod <- NULL
+  
   if (!nodesize){
-    mintrain <- 1000 #arbitrary initial value
-    amod <- NULL
-    mintest <- 1000 #arbitrary initial value
-    bmod <- NULL
-    
-    btrain <- mod$train_metrics[2]
-    bntree <- mod$rf$dots$ntree
-    bmtry <- mod$rf$bestTune$mtry
-    bpreds <- mod$prediction
-    
     #find model with min train and test rmse, resp.
     for (mod in models){
       if(mod$test_metrics[2] < mintest){
         mintest <- mod$test_metrics[2]
         bmod <- mod
       }
-      if(mod$train_metrics[2] < mintrain){
-        mintrain <- mod$train_metrics[2]
+      if(mod$train_metric[2] < mintrain){
+        mintrain <- mod$train_metric[2]
         amod <- mod
       }
     }
     #find the lowest test error while ensuring that the difference between train
     #and test error is not too large and is positive
-    diff_test <- mintest - bmod$train_metrics[2]
+    diff_test <- mintest - bmod$train_metric[2]
     diff_train <- amod$test_metrics[2] - mintrain
     
     if(diff_test < diff_train & diff_test > 0){
       bestmod <- bmod
     } else{bestmod <- amod}
+    
     btest <-  bestmod$test_metrics[2]
-    btrain <- bestmod$train_metrics[2]
+    btrain <- bestmod$train_metric[2]
     bntree <- bestmod$rf$dots$ntree
     bmtry <- bestmod$rf$bestTune$mtry
     bpreds <- bestmod$prediction
@@ -135,7 +131,7 @@ featselec <- function(train_x,train_y,test_x,test_y, nt=500, fold=10){
   mtry <- as.data.frame(tuneRF(train_x, train_y, stepFactor = 1.5, trace=F, plot=F))
   n <- mtry$mtry[mtry$OOBError == min(mtry$OOBError)]
   
-  print("running random forest")
+  print("running random forest for feature selection")
   rf <- randomForest(
     train_x,
     y = train_y,
@@ -224,6 +220,7 @@ hype_tune <- function(train, test, y, cvmethod='cv',folds=10, reps=2, mtry_seq=(
                            tuneGrid = tunegrid,
                            ntree=nt,
                            nodesize=nodesize)
+    
     train_res <- calc_metrics(rf_gridsearch$pred$obs,rf_gridsearch$pred$pred)
     
     rf_pred <- predict(rf_gridsearch,test)
@@ -239,4 +236,59 @@ hype_tune <- function(train, test, y, cvmethod='cv',folds=10, reps=2, mtry_seq=(
     
   }
   return (modellist)
+}
+
+#Normalize Data-----------------------------------------------------------------
+#Scale of 0,1
+
+norm_train <- function(train_x){
+  load("../normVars.RData")
+  #training set
+  
+  train_x <- train_x[, -which (names(train_x) %in% novar_trn)]
+  
+  process_trn <- preProcess(as.data.frame(train_x), method=c("range"))
+  train_x <- predict(process_trn, as.data.frame(train_x))
+  
+  nvtrn_df <- as.data.frame(matrix(0.5,nrow(train_x),length(novar_trn))) 
+  colnames(nvtrn_df) <- novar_trn
+  
+  train_x <- cbind(train_x, nvtrn_df)
+  
+  return(train_x)
+}
+
+norm_alltrain <- function(train_x,train_y){
+  all_train <- train_x
+  all_train$yield_tha <- train_y 
+  all_train <- all_train %>% select(yield_tha, everything())
+  
+  return(all_train)
+}
+
+norm_test <- function(test_x){
+  load("../normVars.RData")
+  #test set
+  
+  novars <- test_x[, -which (names(test_x) %in% novar_tst)]
+  
+  i <- 1
+  while (i <= length(novars)){
+    if (var(novars[[i]])==0){
+      novar_tst <- append(novar_tst, names(novars[i]))
+    }
+    i = i + 1
+  }
+  
+  test_x <- test_x[, -which (names(test_x) %in% novar_tst)]
+  
+  process_tst <- preProcess(as.data.frame(test_x), method=c("range"))
+  test_x <- predict(process_tst, as.data.frame(test_x))
+  
+  nvtst_df <- as.data.frame(matrix(0.5,nrow(test_x),length(novar_tst))) 
+  colnames(nvtst_df) <- novar_tst
+  
+  test_x <- cbind(test_x, nvtst_df)
+  
+  return(test_x)
 }
