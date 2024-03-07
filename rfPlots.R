@@ -2,7 +2,7 @@
 #Generate metrics and Actual Vs. Predicted plot for results of random forest overall.
 #****************************************************************************
 
-generate_plot <- function(datafile,run,method,label="Year"){
+generate_plot <- function(datafile,run,method,label="Year", title="Random Forest Actual Vs. Predicted Yield"){
 avg_fields <- read.csv(datafile)
 
 metrics_oa <- calc_metrics(avg_fields$Actual, avg_fields$Predicted)
@@ -18,7 +18,7 @@ if(label=="CFIDYr"){
                    color=factor(CFIDYr), size=1),shape=1) +
     geom_abline(intercept=0, slope=1) +
     labs(x = "Actual yield (t/ha.)",y="Predicted yield (t/ha.)", 
-         title="Random Forest Actual Vs. Predicted Yield", color="CFIDYr") +
+         title=title, color="CFIDYr") +
     scale_x_continuous(breaks = seq(0,60, by=5)) + 
     scale_y_continuous(breaks = seq(0,60, by=5)) + 
     coord_cartesian(ylim = c(27,55), xlim=c(27,55)) +
@@ -33,7 +33,7 @@ else{
                    color=factor(Year), size=1),shape=1) + 
     geom_abline(intercept=0, slope=1) +
     labs(x = "Actual yield (t/ha.)",y="Predicted yield (t/ha.)", 
-         title="Random Forest Actual Vs. Predicted Yield", color="Year") +
+         title=title, color="Year") +
     scale_x_continuous(breaks = seq(0,60, by=5)) + 
     scale_y_continuous(breaks = seq(0,60, by=5)) + 
     coord_cartesian(ylim = c(27,55), xlim=c(27,55)) +

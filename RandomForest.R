@@ -27,7 +27,7 @@ source("rfFunctions.R")
 source("rfPlots.R")
 
 dataname <- "MR"
-run <- "cv2"
+run <- "monthGDDoct-cv2"
 
 kfolds <- 2 #number of folds
 nsize <- c(1,5,10) #min nodesize -> larger number=smaller tree. 
@@ -36,7 +36,7 @@ nsize <- c(1,5,10) #min nodesize -> larger number=smaller tree.
 seed <- 1234
 
 hybrid <- F
-normalization <- T
+normalization <- F
 
 
 if(normalization){
@@ -51,12 +51,21 @@ if (hybrid){
   dir.create(dir)
   setwd(dir)
 } else{
-  load("MLalone_slope-lidar.RData")
+  load("MLalone_monthlyTemp2.RData")
   dir <- paste(dataname,"_RF",run,sep="")
   dir.create(dir)
   setwd(dir)
 }
 
+#ss_data <- subset(ss_data, select=-c(5,6)) #remove both GDDcum and GDDcum_gs
+#ss_data <- subset(ss_data, select=-c(6)) #remove GDDcum_gs
+#ss_data <- subset(ss_data, select=-c(5:12)) #remove cumulative climate features
+#ss_data <- subset(ss_data, select=-c(5,9:28,37:39,83)) #keep only GS cumulative climate features
+ss_data <- ss_data %>% select(yield_tha,CFIDYr, plant_ye,everything())
+ss_data <- subset(ss_data,select=-c(6:13,42:82,85:110))
+#ss_data <- subset(ss_data,select=-c(6:19,42:82,103:108)) #remove GDD vars, keep only min and max temp vars up to october
+
+c <- length(ss_data)
 
 #RANDOM FOREST------------------------------------------------------------------
 # run '#######' for specific individual field-years (not using for loop) 
@@ -74,22 +83,25 @@ begin <- Sys.time()
   
   #f <- fields[i] ########
   
-  set.seed(seed)
+  
   print(paste("running rf for",f,"at",Sys.time(),sep=" "))
   
-  #Separate each individual field year out as test data
-  ss_data <-  ss_data[sample(1:nrow(ss_data)), ] 
+  #Separate individual field year out as test data
+  set.seed(seed)
+  ss_data <-  ss_data[sample(1:nrow(ss_data)), ] #shuffle data
   train_x <- ss_data[ss_data$CFIDYr != f, 2:c]
-  all_train <- ss_data[ss_data$CFIDYr != f, 1:c] %>% select(1,4:c)
+  all_train <- ss_data[ss_data$CFIDYr != f, 1:c] %>% select(1,4:c) #training dataset including Y
   train_y <- ss_data[ss_data$CFIDYr != f, 1]
   test_x <- ss_data[ss_data$CFIDYr == f, 2:c]
   test_y <- ss_data[ss_data$CFIDYr == f,1]
   
+  #set aside year and field names
   train_yrs <- train_x[,2]
   test_yrs <- test_x[,2]
   train_flds <- train_x[,1]
   test_flds <- test_x[,1]
   
+  #final train and test sets
   train_x <- train_x[,3:length(train_x)]
   test_x <- test_x[,3:length(test_x)]
   
@@ -104,9 +116,13 @@ begin <- Sys.time()
   #feature selection and hyperparameter tuning
   features <- featselec(train_x,train_y,test_x,test_y,fold=kfolds)
   beep(sound=4)
+ 
+  #fnum <- min_mse(features) #get optimal number of features - need to update function
   # set fnum <- features[[num features]] to choose manually #######
-  fnum <- min_mse(features) #get optimal number of features
-  write.csv(fnum$features,paste(f,"/features_",run,".csv",sep=""))
+  
+  write.csv(list(features=fnum$features,per_increaseMSE=fnum$MSE_importance,
+                 NodePurity=fnum$NodeImp_importance),
+                 paste(f,"/features_",run,".csv",sep=""))
   print(paste("Optimum number of features:", fnum, sep=" "))
   
   #update train and test sets to have optimum number of features
@@ -139,13 +155,13 @@ begin <- Sys.time()
   #save all predicted vs. observed field-year yield data points as .csv
   field_pred <- data.frame(labels[i],test_y,prediction)
   colnames(field_pred) <- c("Label","Actual","Predicted")
-  if (i == 1){
-    write.table(field_pred, file=paste("allFields",run,".csv",sep=""), 
-                row.names = F,col.names = T, append = F, sep=",")
-  } else {
-    write.table(field_pred, file=paste("allFields_",run,".csv",sep=""), 
-                row.names = F,col.names = F, append = T, sep=",")
-  }
+  
+  colnames <- if(i == 1) T else F
+  append <- if(i == 1) F else T 
+ 
+  write.table(field_pred, file=paste("allFields_",run,".csv",sep=""), 
+              row.names = F,col.names = colnames, append = append, sep=",")
+
   
   write.csv(field_pred, file=paste(getwd(),"/",f,"/preds_",run,".csv",sep=""))
   
@@ -156,12 +172,12 @@ begin <- Sys.time()
   metrics <- data.frame(Training=train_metrics,
                         Testing=test_metrics)
   if(is.null(nsize)){
-  metrics <- rbind(metrics,c(c(".", best$ntree)))
-  metrics <- rbind(metrics,c(c(".", best$mtry)))
-  metrics <- rbind(metrics,c(c(".", length(fnum$features))))
-  metrics <- rbind(metrics,c(c(".", length(prediction))))
-  rownames(metrics) <- c("MSE","RMSE","RRMSE","R2","BIAS","PBIAS",
-                         "ntree","mtry","num.features","size.test.data")
+    metrics <- rbind(metrics,c(c(".", best$ntree)))
+    metrics <- rbind(metrics,c(c(".", best$mtry)))
+    metrics <- rbind(metrics,c(c(".", length(fnum$features))))
+    metrics <- rbind(metrics,c(c(".", length(prediction))))
+    rownames(metrics) <- c("MSE","RMSE","RRMSE","R2","BIAS","PBIAS",
+                           "ntree","mtry","num.features","size.test.data")
   }else{
     metrics <- rbind(metrics,c(c(".", best$nodesize))) 
     metrics <- rbind(metrics,c(c(".", best$model$ntree)))
@@ -179,20 +195,19 @@ begin <- Sys.time()
   
   overall <- data.frame(CFIDYr=labels[i],Year=test_yrs[1],
                         Actual=avg_obs,Predicted=avg_pred)
-  if (i == 1){
-    write.table(overall, file=paste("ActualVsPredicted_avg",run,".csv",sep=""), 
-                row.names = F,col.names = T, append = F, sep=",")
-  } else {
-    write.table(overall, file=paste("ActualVsPredicted_avg",run,".csv",sep=""), 
-                row.names = F,col.names = F, append = T, sep=",")
-  }
+
+  write.table(overall, file=paste("ActualVsPredicted_avg",run,".csv",sep=""), 
+              row.names = F,col.names = colnames, append = append, sep=",")
+  
   i <- i + 1
   print(paste("Ended at",Sys.time(),sep=" "))
+  print(Sys.time() - begin)
   sink()
-}
+#}
+  
 print(Sys.time() - begin)
 
-generate_plot(paste("ActualVsPredicted_avg",run,".csv",sep=""),run,dataname)
+generate_plot(paste("ActualVsPredicted_avg",run,".csv",sep=""),run,dataname,title="Random Forest w/o Cummulative Climate features")
 
 beep(sound=8)
 beep(sound=4)

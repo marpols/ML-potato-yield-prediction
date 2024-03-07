@@ -37,3 +37,23 @@ new_feats <- all_data[c("CFIDYr","DEMslope1","lidar_elev","rainLatene","sh_PER_S
 ss_data <- merge(ss_data,new_feats,by=c("DEMslope1","CFIDYr")) %>% distinct()
 
 rm("all_data","data","new_feats")
+
+
+#load("MLalone_slope-lidar.RData")
+load("hybrid_lidar.RData")
+
+#update GDD Calculations
+colnames(ss_data)[which(names(ss_data) == "May.GDDcum_gs")] <- "May.GDD"
+ss_data[19] <- ss_data[19]-ss_data[18]
+ss_data[20] <- ss_data[20]-ss_data[19]-ss_data[18]
+ss_data[21] <- ss_data[21]-ss_data[20]-ss_data[19]-ss_data[18]
+ss_data[22] <- ss_data[22]-ss_data[21]-ss_data[20]-ss_data[19]-ss_data[18]
+ss_data[13] <- ss_data[13]-ss_data[18] #Jan2April.GDDcum
+colnames(ss_data)[which(names(ss_data) == "June.GDDcum_gs")] <- "June.GDD"
+colnames(ss_data)[which(names(ss_data) == "July.GDDcum_gs")] <- "July.GDD"
+colnames(ss_data)[which(names(ss_data) == "Aug.GDDcum_gs")] <- "Aug.GDD"
+colnames(ss_data)[which(names(ss_data) == "Sept.GDDcum_gs")] <- "Sept.GDD"
+colnames(ss_data)[which(names(ss_data) == "May.GDDcum")] <- "Jan2Apr.GDDcum"
+#remove columns 14-17
+ss_data <- select(ss_data,1:13,18:ncol(ss_data))
+c <- ncol(ss_data)

@@ -58,21 +58,21 @@ best_mod <- function(models, nodesize = F){
   if (!nodesize){
     #find model with min train and test rmse, resp.
     for (mod in models){
-      if(mod$test_metrics[2] < mintest){
+      if(mod$test_metrics[2] < mintest & mod$test_metrics[2]-mod$train_metric[2]>0){
         mintest <- mod$test_metrics[2]
         bmod <- mod
       }
-      if(mod$train_metric[2] < mintrain){
+      if(mod$train_metric[2] < mintrain & mod$test_metrics[2]-mod$train_metric[2]>0){
         mintrain <- mod$train_metric[2]
         amod <- mod
       }
     }
     #find the lowest test error while ensuring that the difference between train
     #and test error is not too large and is positive
-    diff_test <- mintest - bmod$train_metric[2]
-    diff_train <- amod$test_metrics[2] - mintrain
-    
-    if(diff_test < diff_train & diff_test > 0){
+    if(is.null(bmod)){
+      print(paste("Warning: All test errors > train errors for current nodeseize",sep=""))
+      return(NULL)
+    } else if(bmod$test_metrics[2] >= amod$test_metrics[2]){
       bestmod <- bmod
     } else{bestmod <- amod}
     
@@ -107,14 +107,15 @@ best_mod <- function(models, nodesize = F){
 }
 
 #Feature Selection--------------------------------------------------------------
-featselec <- function(train_x,train_y,test_x,test_y, nt=500, fold=10){
+featselec <- function(train_x,train_y,test_x,test_y, nt=500, fold=10, MSE=T, af=2){
   
-  set.seed(seed)
+ 
   
   varlist <- list()
   
   #CV for feature selection
   print("getting optimum number of features")
+  set.seed(seed)
   CV <- rfcv(
     train_x,
     train_y,
@@ -132,13 +133,15 @@ featselec <- function(train_x,train_y,test_x,test_y, nt=500, fold=10){
   n <- mtry$mtry[mtry$OOBError == min(mtry$OOBError)]
   
   print("running random forest for feature selection")
+  set.seed(seed)
   rf <- randomForest(
     train_x,
     y = train_y,
     proximity = TRUE,
     ntree = nt,
     mtry = n,
-    plot = TRUE)
+    plot = TRUE,
+    importance=MSE)
   print(rf)
   
   print("getting variable importance")
@@ -149,7 +152,7 @@ featselec <- function(train_x,train_y,test_x,test_y, nt=500, fold=10){
   
   print("starting add-one-in feature selection approach")
   j <- 1
-  while (j <= v + 2) { #try additional 2 features than what CV gives
+  while (j <= v + af) { #try additional 2 features than what CV gives
     set.seed(seed)
     trnx <- train_x[importance$vars[1:j]]
     tstx <- test_x[importance$vars[1:j]]
@@ -159,7 +162,7 @@ featselec <- function(train_x,train_y,test_x,test_y, nt=500, fold=10){
       mtry <- as.data.frame(tuneRF(trnx, train_y, stepFactor = 1.5))
       n <- mtry$mtry[mtry$OOBError == min(mtry$OOBError)]
     }
-    
+    set.seed(seed)
     rf <-
       randomForest(
         trnx,
@@ -167,7 +170,9 @@ featselec <- function(train_x,train_y,test_x,test_y, nt=500, fold=10){
         proximity = TRUE,
         ntree = nt,
         mtry = n,
-        plot = TRUE
+        plot = TRUE,
+        importance=MSE,
+        seed=seed
       )
     trnm <- calc_metrics(train_y, rf[3]$predicted)
     pred <- predict(rf, tstx, type = "response", predict.all = TRUE)
@@ -175,7 +180,9 @@ featselec <- function(train_x,train_y,test_x,test_y, nt=500, fold=10){
     
     #number of features, ntree, mtry, train mse, test mse
     val <- list("num_features"=j, "ntrees"=nt, "mtry"=n,"train_mse"=trnm[1],"test_mse"=tstm[1])
-    info <- list(metrics=val,features=importance$vars[1:j])
+    info <- list(metrics=val,features=importance$vars[1:j],
+                 MSE_importance=importance$X.IncMSE[1:j],
+                 NodeImp_importance=importance$IncNodePurity[1:j])
     varlist[[j]] <- info
     
     print(paste("number of features:",j,"ntree:",nt,"mtry:",n,"train MSE:",
